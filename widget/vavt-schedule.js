@@ -180,6 +180,17 @@ function weekView(data, now) {
   return { start: week.start, end: week.end, days };
 }
 
+// Что отсчитывать: конец идущей пары или начало следующей сегодня; иначе ничего.
+function countdown(lessons, now) {
+  const today = isoOf(now);
+  const todays = lessons.filter((l) => l.date === today);
+  const cur = todays.find((l) => l.from <= now && l.to > now);
+  if (cur) return { going: true, target: cur.to, lesson: cur };
+  const next = todays.find((l) => l.from > now);
+  if (next) return { going: false, target: next.from, lesson: next };
+  return null;
+}
+
 // Делит дни на два столбца так, чтобы по высоте (строки + заголовки) они были примерно равны.
 function splitColumns(days) {
   const h = (d) => d.items.length + 1.4;
@@ -196,7 +207,7 @@ function splitColumns(days) {
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
+  module.exports = { countdown, withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
 } else {
   await run();
 }
@@ -392,6 +403,10 @@ function renderWeek(w, now, c, data, family) {
   const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days) : [week.days];
   const row = w.addStack();
   row.topAlignContent();
+  // отсчёт ставим под более короткий столбец (обычно — под субботой)
+  const heightOf = (days) => days.reduce((s, d) => s + d.items.length + 1.4, 0);
+  const shortest = cols.length > 1 && heightOf(cols[1]) <= heightOf(cols[0]) ? 1 : 0;
+  const cd = countdown(flatten(data), now);
   cols.forEach((days, i) => {
     if (i > 0) row.addSpacer(6);
     const col = row.addStack();
@@ -400,8 +415,45 @@ function renderWeek(w, now, c, data, family) {
       if (j > 0) col.addSpacer(8);
       dayCard(col, day, today, now, c);
     });
+    if (cd && i === shortest) countdownCard(col, cd, c);
   });
   w.addSpacer();
+}
+
+// Карточка с живым таймером: iOS сам отсчитывает секунды, обновлять виджет не нужно.
+function countdownCard(col, cd, c) {
+  col.addSpacer(8);
+  const box = col.addStack();
+  box.layoutVertically();
+  box.setPadding(7, 7, 8, 6);
+  box.cornerRadius = 10;
+  box.backgroundColor = cd.going ? c.todayBg : c.card;
+
+  const top = box.addStack();
+  const lab = top.addText(cd.going ? "До конца пары" : "До начала пары");
+  lab.font = Font.semiboldSystemFont(10);
+  lab.textColor = c.dim;
+  top.addSpacer();
+
+  box.addSpacer(1);
+  const timer = box.addDate(cd.target);
+  timer.applyTimerStyle();
+  timer.font = Font.boldMonospacedSystemFont(26);
+  timer.textColor = cd.going ? c.now : c.text;
+  timer.lineLimit = 1;
+
+  box.addSpacer(2);
+  const l = cd.lesson;
+  const line = box.addStack();
+  line.centerAlignContent();
+  const name = line.addText(withKind(shortTitle(l.title), l.kind));
+  name.font = Font.mediumSystemFont(11.5);
+  name.textColor = c.text;
+  name.lineLimit = 1;
+  line.addSpacer();
+  const when = line.addText(cd.going ? `до ${l.end}` : `в ${l.start}`);
+  when.font = Font.systemFont(9);
+  when.textColor = c.dim;
 }
 
 function dayCard(col, day, today, now, c) {
