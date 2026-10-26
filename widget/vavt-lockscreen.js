@@ -3,14 +3,24 @@
 // icon-color: deep-blue; icon-glyph: stopwatch;
 
 // Расписание ВАВТ — виджет для экрана блокировки (Scriptable).
-// Показывает живой отсчёт: до конца идущей пары или до начала следующей.
-// Размеры: прямоугольный (таймер + пара + аудитория), круглый (таймер),
-// строка над часами (пара и время окончания/начала).
+//  • идёт пара — отсчёт до её конца
+//  • перемена — отсчёт до начала следующей пары
+//  • утром до первой пары — «Сегодня в 09:00» без таймера
+//  • все пары на сегодня закончились (и в выходные) — арабское слово из словаря,
+//    каждые 15 минут новое
+// Размеры: прямоугольный, круглый, строка над часами.
 
 const DATA_URLS = [
   "https://raw.githubusercontent.com/Tipo4ekGG/vavt-schedule/main/data/schedule.json",
   "https://cdn.jsdelivr.net/gh/Tipo4ekGG/vavt-schedule@main/data/schedule.json",
 ];
+
+// Словарь для слов после пар.
+const DICT_URLS = [
+  "https://raw.githubusercontent.com/Tipo4ekGG/arab/main/index.html",
+  "https://cdn.jsdelivr.net/gh/Tipo4ekGG/arab@main/index.html",
+];
+const WORD_EVERY_MIN = 15;
 
 // Пары, которые не показывать (по началу названия).
 const HIDE = ["Русский как иностранный"];
@@ -72,17 +82,41 @@ function flatten(data) {
 }
 
 // Что показывать сейчас.
-//  going — идёт пара, отсчёт до конца
-//  break — сегодня ещё будет пара, отсчёт до начала
-//  later — сегодня пар больше нет, показываем ближайшую (без таймера)
+//  going   — идёт пара, отсчёт до конца
+//  break   — перемена, отсчёт до начала следующей
+//  morning — сегодня пары ещё не начинались: первая пара без таймера
+//  word    — на сегодня пар больше нет: арабское слово
 function status(lessons, now) {
   const today = isoOf(now);
-  const cur = lessons.find((l) => l.from <= now && l.to > now);
+  const todays = lessons.filter((l) => l.date === today);
+  const cur = todays.find((l) => l.from <= now && l.to > now);
   if (cur) return { kind: "going", target: cur.to, lesson: cur };
-  const next = lessons.find((l) => l.from > now);
-  if (!next) return { kind: "none" };
-  if (next.date === today) return { kind: "break", target: next.from, lesson: next };
-  return { kind: "later", lesson: next };
+  const next = todays.find((l) => l.from > now);
+  if (!next) return { kind: "word" };
+  if (todays.some((l) => l.to <= now)) return { kind: "break", target: next.from, lesson: next };
+  return { kind: "morning", lesson: next };
+}
+
+// Слова из таблиц словаря: первая ячейка class="ar", "tr" и "ru" в строке.
+function parseWords(html) {
+  const out = [], seen = {};
+  const strip = (x) => x.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  for (const row of html.match(/<tr>[\s\S]*?<\/tr>/g) || []) {
+    const cells = [...row.matchAll(/<td class="(ar|tr|ru)"[^>]*>([\s\S]*?)<\/td>/g)].map((m) => ({ k: m[1], v: strip(m[2]) }));
+    const ar = cells.find((c) => c.k === "ar"), tr = cells.find((c) => c.k === "tr"), ru = cells.find((c) => c.k === "ru");
+    if (!ar || !ru || !ar.v || !ru.v || /^ـ/.test(ar.v) || seen[ar.v]) continue;
+    seen[ar.v] = 1;
+    out.push({ ar: ar.v, tr: tr ? tr.v : "", ru: ru.v });
+  }
+  return out;
+}
+
+// Слово на текущие 15 минут: в пределах интервала одно и то же, потом следующее.
+function wordFor(words, now) {
+  if (!words.length) return null;
+  const slot = Math.floor(now.getTime() / (WORD_EVERY_MIN * 60000));
+  const i = ((slot * 2654435761) % 4294967296) % words.length;
+  return words[i];
 }
 
 function dayWord(isoDay, now) {
@@ -93,7 +127,13 @@ function dayWord(isoDay, now) {
   return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][d.getDay()];
 }
 
-function nextRefresh(st, now) {
+function nextRefresh(st, now, lessons) {
+  if (st.kind === "word") {
+    // следующая смена слова; к полуночи — чтобы утром показать первую пару
+    const step = WORD_EVERY_MIN * 60000;
+    return new Date((Math.floor(now.getTime() / step) + 1) * step + 2000);
+  }
+  if (st.kind === "morning") return st.lesson.from;
   const in15 = new Date(now.getTime() + 15 * 60000);
   const min = new Date(now.getTime() + 60000);
   if (st.target && st.target < in15) return st.target > min ? st.target : min;
@@ -103,7 +143,7 @@ function nextRefresh(st, now) {
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { flatten, status, label, dayWord, nextRefresh, isoOf };
+  module.exports = { flatten, status, label, dayWord, nextRefresh, isoOf, parseWords, wordFor };
 } else {
   await run();
 }
@@ -126,11 +166,35 @@ async function loadData() {
   return null;
 }
 
+// Словарь кешируется и перекачивается не чаще раза в 6 часов.
+async function loadWords() {
+  const fm = FileManager.local();
+  const cache = fm.joinPath(fm.cacheDirectory(), "arab-words.json");
+  const fresh = fm.fileExists(cache) && (Date.now() - fm.modificationDate(cache).getTime()) < 6 * 3600000;
+  if (fresh) return JSON.parse(fm.readString(cache));
+  for (const url of DICT_URLS) {
+    try {
+      const req = new Request(url + "?t=" + Date.now());
+      req.timeoutInterval = 12;
+      const words = parseWords(await req.loadString());
+      if (words.length) {
+        fm.writeString(cache, JSON.stringify(words));
+        return words;
+      }
+    } catch (e) {}
+  }
+  return fm.fileExists(cache) ? JSON.parse(fm.readString(cache)) : [];
+}
+
 async function run() {
   const now = new Date();
   const family = config.widgetFamily || "accessoryRectangular";
   const data = await loadData();
-  const st = data ? status(flatten(data), now) : { kind: "error" };
+  let st = data ? status(flatten(data), now) : { kind: "word" };
+  if (st.kind === "word") {
+    st.word = wordFor(await loadWords(), now);
+    if (!st.word) st = { kind: data ? "none" : "error" };
+  }
 
   const w = new ListWidget();
   w.refreshAfterDate = nextRefresh(st, now);
@@ -154,11 +218,12 @@ function rectangular(w, st, now) {
     w.addText("Пар больше нет").font = Font.semiboldSystemFont(14);
     return;
   }
+  if (st.kind === "word") return wordRect(w, st.word);
   const l = st.lesson;
   const top = w.addText(
     st.kind === "going" ? "До конца пары" :
     st.kind === "break" ? "До начала пары" :
-    `${dayWord(l.date, now)} в ${l.start}`
+    `Сегодня в ${l.start}`
   );
   top.font = Font.semiboldSystemFont(11);
   top.textOpacity = 0.75;
@@ -185,6 +250,23 @@ function rectangular(w, st, now) {
   row.addSpacer();
 }
 
+function wordRect(w, word) {
+  const a = w.addText(word.ar);
+  a.font = Font.boldSystemFont(24);
+  a.lineLimit = 1;
+  a.minimumScaleFactor = 0.5;
+  const r = w.addText(word.ru);
+  r.font = Font.mediumSystemFont(13);
+  r.lineLimit = 1;
+  r.minimumScaleFactor = 0.8;
+  if (word.tr) {
+    const t = w.addText(word.tr);
+    t.font = Font.systemFont(11);
+    t.textOpacity = 0.75;
+    t.lineLimit = 1;
+  }
+}
+
 function circular(w, st, now) {
   w.addAccessoryWidgetBackground = true;
   w.setPadding(2, 2, 2, 2);
@@ -207,8 +289,12 @@ function circular(w, st, now) {
     add("—", Font.boldSystemFont(18));
     return;
   }
+  if (st.kind === "word") {
+    add(st.word.ar.split(" / ")[0], Font.boldSystemFont(18));
+    return;
+  }
   if (!st.target) {
-    add(dayWord(st.lesson.date, now), Font.semiboldSystemFont(10), 0.75);
+    add("сегодня", Font.semiboldSystemFont(9), 0.75);
     add(st.lesson.start, Font.boldSystemFont(15));
     return;
   }
@@ -229,7 +315,7 @@ function inline(w, st, now) {
   if (st.kind === "error") text = "Расписание: нет данных";
   else if (st.kind === "none") text = "Пар больше нет";
   else if (st.kind === "going") text = `${label(st.lesson)} до ${st.lesson.end}`;
-  else if (st.kind === "break") text = `${label(st.lesson)} в ${st.lesson.start}`;
-  else text = `${dayWord(st.lesson.date, now)} ${st.lesson.start} ${label(st.lesson)}`;
+  else if (st.kind === "word") text = `${st.word.ar} — ${st.word.ru}`;
+  else text = `${label(st.lesson)} в ${st.lesson.start}`;
   w.addText(text);
 }
