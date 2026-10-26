@@ -98,8 +98,9 @@ function nextRefresh(lessons, now) {
   sw.setDate(sw.getDate() + ((SWITCH_WEEKDAY - now.getDay() + 7) % 7));
   if (sw > now) marks.push(sw);
   marks.sort((a, b) => a - b);
-  const soon = new Date(now.getTime() + 15 * 60000);
-  const later = new Date(now.getTime() + 3 * 3600000);
+  // данные на GitHub проверяются раз в 15 минут — виджет просит обновление не реже
+  const soon = new Date(now.getTime() + 5 * 60000);
+  const later = new Date(now.getTime() + 15 * 60000);
   const t = marks[0] && marks[0] < later ? marks[0] : later;
   return t < soon ? soon : t;
 }

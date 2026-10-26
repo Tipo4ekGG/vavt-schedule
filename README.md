@@ -6,7 +6,7 @@
 vavt.ru/schedule  ──PDF──▶  GitHub Actions (parser/)  ──▶  data/schedule.json  ──▶  Scriptable-виджет
 ```
 
-- Раз в 3 часа GitHub Actions берёт со страницы курса PDF на текущие две недели, разбирает таблицу и коммитит `data/schedule.json` (и `data/schedule.txt` — то же самое текстом).
+- Каждые 15 минут GitHub Actions берёт со страницы курса PDF на текущие две недели, разбирает таблицу и коммитит `data/schedule.json` (и `data/schedule.txt` — то же самое текстом).
 - Виджет на телефоне только читает этот JSON и кеширует его на случай, если нет сети.
 
 ## Установка виджета
