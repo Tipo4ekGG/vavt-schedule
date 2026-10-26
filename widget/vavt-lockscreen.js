@@ -5,9 +5,8 @@
 // Расписание ВАВТ — виджет для экрана блокировки (Scriptable).
 //  • идёт пара — отсчёт до её конца
 //  • перемена — отсчёт до начала следующей пары
-//  • утром до первой пары — «Сегодня в 09:00» без таймера
-//  • все пары на сегодня закончились (и в выходные) — арабское слово из словаря,
-//    каждые 15 минут новое
+//  • всё остальное время (утром до первой пары, после пар, в выходные) —
+//    арабское слово из словаря, каждые 15 минут новое
 // Размеры: прямоугольный, круглый, строка над часами.
 
 const DATA_URLS = [
@@ -84,8 +83,7 @@ function flatten(data) {
 // Что показывать сейчас.
 //  going   — идёт пара, отсчёт до конца
 //  break   — перемена, отсчёт до начала следующей
-//  morning — сегодня пары ещё не начинались: первая пара без таймера
-//  word    — на сегодня пар больше нет: арабское слово
+//  word    — до первой пары и после последней: арабское слово
 function status(lessons, now) {
   const today = isoOf(now);
   const todays = lessons.filter((l) => l.date === today);
@@ -94,7 +92,7 @@ function status(lessons, now) {
   const next = todays.find((l) => l.from > now);
   if (!next) return { kind: "word" };
   if (todays.some((l) => l.to <= now)) return { kind: "break", target: next.from, lesson: next };
-  return { kind: "morning", lesson: next };
+  return { kind: "word" };
 }
 
 // Слова из таблиц словаря: первая ячейка class="ar", "tr" и "ru" в строке.
@@ -133,7 +131,6 @@ function nextRefresh(st, now, lessons) {
     const step = WORD_EVERY_MIN * 60000;
     return new Date((Math.floor(now.getTime() / step) + 1) * step + 2000);
   }
-  if (st.kind === "morning") return st.lesson.from;
   const in15 = new Date(now.getTime() + 15 * 60000);
   const min = new Date(now.getTime() + 60000);
   if (st.target && st.target < in15) return st.target > min ? st.target : min;
@@ -259,12 +256,6 @@ function wordRect(w, word) {
   r.font = Font.mediumSystemFont(13);
   r.lineLimit = 1;
   r.minimumScaleFactor = 0.8;
-  if (word.tr) {
-    const t = w.addText(word.tr);
-    t.font = Font.systemFont(11);
-    t.textOpacity = 0.75;
-    t.lineLimit = 1;
-  }
 }
 
 function circular(w, st, now) {
