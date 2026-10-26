@@ -215,7 +215,7 @@ function rectangular(w, st, now) {
     w.addText("Пар больше нет").font = Font.semiboldSystemFont(14);
     return;
   }
-  if (st.kind === "word") return wordRect(w, st.word);
+  if (st.kind === "word") { wordRect(w, st.word); w.addSpacer(); return; }
   const l = st.lesson;
   const top = w.addText(
     st.kind === "going" ? "До конца пары" :
@@ -241,19 +241,23 @@ function rectangular(w, st, now) {
   if (l.room) {
     row.addSpacer(4);
     const r = row.addText(l.room);
-    r.font = Font.systemFont(11);
+    r.font = Font.systemFont(10);
     r.textOpacity = 0.75;
   }
   row.addSpacer();
+  w.addSpacer(); // прижать к верху — на одной линии с соседним виджетом
 }
 
 function wordRect(w, word) {
+  const h = w.addText("Арабское слово");
+  h.font = Font.semiboldSystemFont(11);
+  h.textOpacity = 0.75;
   const a = w.addText(word.ar);
-  a.font = Font.boldSystemFont(24);
+  a.font = Font.boldSystemFont(22);
   a.lineLimit = 1;
   a.minimumScaleFactor = 0.5;
   const r = w.addText(word.ru);
-  r.font = Font.mediumSystemFont(13);
+  r.font = Font.mediumSystemFont(12);
   r.lineLimit = 1;
   r.minimumScaleFactor = 0.8;
 }

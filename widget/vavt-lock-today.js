@@ -177,7 +177,7 @@ function rectangular(w, view, now) {
     const row = w.addStack();
     row.centerAlignContent();
     const t = row.addText(l.going ? `● ${l.start}` : l.start);
-    t.font = Font.boldMonospacedSystemFont(12);
+    t.font = Font.semiboldMonospacedSystemFont(11);
     row.addSpacer(5);
     const n = row.addText(label(l));
     n.font = l.going ? Font.boldSystemFont(12) : Font.mediumSystemFont(12);
