@@ -1,0 +1,55 @@
+name: Обновить расписание
+
+on:
+  schedule:
+    # каждые 3 часа (время UTC; в Москве +3)
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "parser/**"
+      - ".github/workflows/update.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-schedule
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: parser/requirements.txt
+
+      - run: pip install -r parser/requirements.txt
+
+      - name: Скачать и разобрать PDF
+        run: |
+          mkdir -p data
+          python parser/vavt_schedule.py \
+            --group "${{ vars.GROUP || 'Б26М-ММВЯ.2' }}" \
+            --faculty "${{ vars.FACULTY || 'ФВМ' }}" \
+            --course "${{ vars.COURSE || '1 курс' }}" \
+            --profile "${{ vars.PROFILE || 'ММВЯ' }}" \
+            --json data/schedule.json \
+            --text data/schedule.txt
+
+      - name: Закоммитить, если расписание поменялось
+        run: |
+          git add data
+          if git diff --cached --quiet; then
+            echo "Без изменений"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Обновить расписание"
+          git push
