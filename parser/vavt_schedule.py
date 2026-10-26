@@ -306,6 +306,104 @@ def build(group: str, level: str, form: str, faculty: str, course: str, profile:
     }
 
 
+# ---------------------------------------------------------------- изменения
+
+KEEP_CHANGES_DAYS = 3
+
+
+def msk_now() -> dt.datetime:
+    from zoneinfo import ZoneInfo
+    return dt.datetime.now(ZoneInfo("Europe/Moscow"))
+
+
+def _lessons_by_date(result: dict, week_starts: set) -> dict:
+    out = {}
+    for w in result.get("weeks", []):
+        if w.get("start") not in week_starts:
+            continue
+        for d in w.get("days", []):
+            out[d["date"]] = d["lessons"]
+    return out
+
+
+def diff_lessons(date: str, old: list, new: list) -> list:
+    """Что поменялось за день: перенос, аудитория, тип занятия, отмена, добавление."""
+    out = []
+    old = list(old)
+    new = list(new)
+
+    def base(change, title):
+        return {"date": date, "change": change, "title": title}
+
+    # 1) та же пара в то же время — сравнить аудиторию и тип
+    for n in list(new):
+        o = next((x for x in old if x["start"] == n["start"] and x["title"] == n["title"]), None)
+        if not o:
+            continue
+        old.remove(o)
+        new.remove(n)
+        if (o.get("room") or "") != (n.get("room") or ""):
+            out.append({**base("room", n["title"]), "kind": n.get("kind"), "start": n["start"],
+                        "room_before": o.get("room"), "room_after": n.get("room")})
+        if (o.get("kind") or "") != (n.get("kind") or ""):
+            out.append({**base("type", n["title"]), "start": n["start"],
+                        "kind_before": o.get("kind"), "kind_after": n.get("kind")})
+    # 2) та же дисциплина в другое время — перенос
+    for n in list(new):
+        o = next((x for x in old if x["title"] == n["title"] and x.get("kind") == n.get("kind")), None) \
+            or next((x for x in old if x["title"] == n["title"]), None)
+        if not o:
+            continue
+        old.remove(o)
+        new.remove(n)
+        out.append({**base("moved", n["title"]), "kind": n.get("kind"),
+                    "start_before": o["start"], "start": n["start"],
+                    "room_before": o.get("room"), "room_after": n.get("room")})
+    # 3) остальное — отменено / добавлено
+    for o in old:
+        out.append({**base("cancelled", o["title"]), "kind": o.get("kind"), "start_before": o["start"]})
+    for n in new:
+        out.append({**base("added", n["title"]), "kind": n.get("kind"), "start": n["start"], "room_after": n.get("room")})
+    return out
+
+
+def find_changes(old: dict, new: dict) -> list:
+    """Сравнивает только недели, которые есть и в старой, и в новой версии."""
+    common = {w["start"] for w in old.get("weeks", [])} & {w["start"] for w in new.get("weeks", [])}
+    # неделя, которая внезапно разобралась пустой, — скорее сбой разбора, а не отмена всех пар
+    for w in new.get("weeks", []):
+        if w["start"] in common and not w.get("days"):
+            common.discard(w["start"])
+    o, n = _lessons_by_date(old, common), _lessons_by_date(new, common)
+    out = []
+    for date in sorted(set(o) | set(n)):
+        out += diff_lessons(date, o.get(date, []), n.get(date, []))
+    return out
+
+
+def merge_changes(old: dict, new: dict, now: dt.datetime) -> list:
+    """Старые изменения (свежие и на будущие дни) + новые, без повторов."""
+    today = now.date().isoformat()
+    since = now - dt.timedelta(days=KEEP_CHANGES_DAYS)
+    kept = []
+    for c in old.get("changes", []):
+        try:
+            seen = dt.datetime.fromisoformat(c["detected"])
+        except (KeyError, ValueError):
+            continue
+        if c["date"] >= today and seen >= since:
+            kept.append(c)
+    stamp = now.isoformat(timespec="minutes")
+    key = lambda c: json.dumps({k: v for k, v in c.items() if k != "detected"}, ensure_ascii=False, sort_keys=True)
+    have = {key(c) for c in kept}
+    for c in find_changes(old, new):
+        if c["date"] >= today and key(c) not in have:
+            kept.append({**c, "detected": stamp})
+            have.add(key(c))
+    kept.sort(key=lambda c: (c["date"], c.get("start") or c.get("start_before") or ""))
+    return kept
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--group", default="Б26М-ММВЯ.2")
@@ -339,6 +437,15 @@ def main(argv=None) -> int:
 
     text = as_text(result)
     if a.json:
+        try:
+            with open(a.json, encoding="utf-8") as f:
+                previous = json.load(f)
+        except (OSError, ValueError):
+            previous = {}
+        if previous.get("group") == result["group"]:
+            result["changes"] = merge_changes(previous, result, msk_now())
+        else:
+            result["changes"] = []
         with open(a.json, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=1)
             f.write("\n")

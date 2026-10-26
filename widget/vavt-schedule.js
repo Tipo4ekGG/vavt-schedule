@@ -180,15 +180,56 @@ function weekView(data, now) {
   return { start: week.start, end: week.end, days };
 }
 
-// Что отсчитывать: конец идущей пары или начало следующей сегодня; иначе ничего.
-function countdown(lessons, now) {
+// Изменения в расписании на сегодня и дальше (парсер хранит их 3 дня).
+function activeChanges(data, now) {
   const today = isoOf(now);
-  const todays = lessons.filter((l) => l.date === today);
-  const cur = todays.find((l) => l.from <= now && l.to > now);
-  if (cur) return { going: true, target: cur.to, lesson: cur };
-  const next = todays.find((l) => l.from > now);
-  if (next) return { going: false, target: next.from, lesson: next };
-  return null;
+  return (data.changes || []).filter((ch) =>
+    ch.date >= today && !HIDE.some((h) => (ch.title || "").startsWith(h)));
+}
+
+const WD_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+
+function changeText(ch) {
+  const d = toDate(ch.date, "00:00");
+  const day = `${WD_SHORT[d.getDay()]} ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const t = shortTitle(ch.title);
+  const tk = withKind(t, ch.kind);
+  switch (ch.change) {
+    case "moved": return `${day} · ${tk}: ${ch.start_before} → ${ch.start}`;
+    case "room": return `${day} · ${tk}: ауд. ${ch.room_before || "—"} → ${ch.room_after || "—"}`;
+    case "type": return `${day} · ${t}: (${ch.kind_before || "?"}) → (${ch.kind_after || "?"})`;
+    case "cancelled": return `${day} · ${tk} в ${ch.start_before} отменена`;
+    case "added": return `${day} · ${tk} в ${ch.start} — новая`;
+    default: return `${day} · ${t}`;
+  }
+}
+
+// Пара, которой касается изменение, — чтобы подсветить её в неделе.
+function isChanged(changes, l) {
+  return changes.some((ch) => ch.date === l.date && ch.start === l.start && ch.title === l.title);
+}
+
+// Фразы из таблиц словаря с заголовком «Фраза».
+function parsePhrases(html) {
+  const out = [];
+  const strip = (x) => x.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  for (const table of html.match(/<table[\s\S]*?<\/table>/g) || []) {
+    const head = (table.match(/<th>([\s\S]*?)<\/th>/) || [])[1];
+    if (!head || strip(head) !== "Фраза") continue;
+    for (const row of table.match(/<tr>[\s\S]*?<\/tr>/g) || []) {
+      const ar = (row.match(/<td class="ar"[^>]*>([\s\S]*?)<\/td>/) || [])[1];
+      const ru = (row.match(/<td class="ru"[^>]*>([\s\S]*?)<\/td>/) || [])[1];
+      if (ar && ru) out.push({ ar: strip(ar), ru: strip(ru) });
+    }
+  }
+  return out;
+}
+
+// Фраза дня: весь день одна, на следующий — другая.
+function phraseFor(phrases, now) {
+  if (!phrases.length) return null;
+  const day = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 86400000);
+  return phrases[((day * 2654435761) % 4294967296) % phrases.length];
 }
 
 // Делит дни на два столбца так, чтобы по высоте (строки + заголовки) они были примерно равны.
@@ -207,7 +248,7 @@ function splitColumns(days) {
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { countdown, withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
+  module.exports = { activeChanges, changeText, isChanged, parsePhrases, phraseFor, withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
 } else {
   await run();
 }
@@ -230,6 +271,31 @@ async function loadData() {
   }
   if (fm.fileExists(cache)) return { data: JSON.parse(fm.readString(cache)), stale: true };
   throw new Error(errors.join("\n"));
+}
+
+const DICT_URLS = [
+  "https://raw.githubusercontent.com/Tipo4ekGG/arab/main/index.html",
+  "https://cdn.jsdelivr.net/gh/Tipo4ekGG/arab@main/index.html",
+];
+
+// Фразы словаря; перекачиваются не чаще раза в сутки.
+async function loadPhrases() {
+  const fm = FileManager.local();
+  const cache = fm.joinPath(fm.cacheDirectory(), "arab-phrases.json");
+  const fresh = fm.fileExists(cache) && (Date.now() - fm.modificationDate(cache).getTime()) < 24 * 3600000;
+  if (fresh) return JSON.parse(fm.readString(cache));
+  for (const url of DICT_URLS) {
+    try {
+      const req = new Request(url + "?t=" + Date.now());
+      req.timeoutInterval = 12;
+      const list = parsePhrases(await req.loadString());
+      if (list.length) {
+        fm.writeString(cache, JSON.stringify(list));
+        return list;
+      }
+    } catch (e) {}
+  }
+  return fm.fileExists(cache) ? JSON.parse(fm.readString(cache)) : [];
 }
 
 function colors() {
@@ -276,7 +342,11 @@ async function run() {
   w.url = data.source || "https://www.vavt.ru/schedule/";
 
   if (mode === "next") renderNext(w, lessons, now, c, data);
-  else if (mode === "week") renderWeek(w, now, c, data, family);
+  else if (mode === "week") {
+    const changes = activeChanges(data, now);
+    const phrase = changes.length ? null : phraseFor(await loadPhrases(), now);
+    renderWeek(w, now, c, data, family, changes, phrase);
+  }
   else renderDay(w, lessons, now, c, data, family);
 
   if (stale) {
@@ -385,7 +455,7 @@ function renderDay(w, lessons, now, c, data, family) {
   w.addSpacer();
 }
 
-function renderWeek(w, now, c, data, family) {
+function renderWeek(w, now, c, data, family, changes = [], phrase = null) {
   const week = weekView(data, now);
   if (!week || !week.days.length) {
     header(w, data.group, null, c);
@@ -406,57 +476,87 @@ function renderWeek(w, now, c, data, family) {
   // отсчёт ставим под более короткий столбец (обычно — под субботой)
   const heightOf = (days) => days.reduce((s, d) => s + d.items.length + 1.4, 0);
   const shortest = cols.length > 1 && heightOf(cols[1]) <= heightOf(cols[0]) ? 1 : 0;
-  const cd = countdown(flatten(data), now);
+
   cols.forEach((days, i) => {
     if (i > 0) row.addSpacer(6);
     const col = row.addStack();
     col.layoutVertically();
     days.forEach((day, j) => {
       if (j > 0) col.addSpacer(8);
-      dayCard(col, day, today, now, c);
+      dayCard(col, day, today, now, c, changes);
     });
-    if (cd && i === shortest) countdownCard(col, cd, c);
+    if (i === shortest) {
+      if (changes.length) changesCard(col, changes, c);
+      else if (phrase) phraseCard(col, phrase, c);
+    }
   });
   w.addSpacer();
 }
 
-// Карточка с живым таймером: iOS сам отсчитывает секунды, обновлять виджет не нужно.
-function countdownCard(col, cd, c) {
+// Сводка изменений: до 3 строк, остальное — «ещё N».
+function changesCard(col, changes, c) {
   col.addSpacer(8);
   const box = col.addStack();
   box.layoutVertically();
   box.setPadding(7, 7, 8, 6);
   box.cornerRadius = 10;
-  box.backgroundColor = cd.going ? c.todayBg : c.card;
+  box.backgroundColor = c.todayBg;
 
-  const top = box.addStack();
-  const lab = top.addText(cd.going ? "До конца пары" : "До начала пары");
-  lab.font = Font.semiboldSystemFont(10);
-  lab.textColor = c.dim;
-  top.addSpacer();
+  const head = box.addText("Изменения в расписании");
+  head.font = Font.boldSystemFont(11);
+  head.textColor = c.accent;
+  head.lineLimit = 1;
 
-  box.addSpacer(1);
-  const timer = box.addDate(cd.target);
-  timer.applyTimerStyle();
-  timer.font = Font.boldMonospacedSystemFont(26);
-  timer.textColor = cd.going ? c.now : c.text;
-  timer.lineLimit = 1;
-
-  box.addSpacer(2);
-  const l = cd.lesson;
-  const line = box.addStack();
-  line.centerAlignContent();
-  const name = line.addText(withKind(shortTitle(l.title), l.kind));
-  name.font = Font.mediumSystemFont(11.5);
-  name.textColor = c.text;
-  name.lineLimit = 1;
-  line.addSpacer();
-  const when = line.addText(cd.going ? `до ${l.end}` : `в ${l.start}`);
-  when.font = Font.systemFont(9);
-  when.textColor = c.dim;
+  const MAX = 3;
+  const shown = changes.length > MAX ? changes.slice(0, MAX - 1) : changes;
+  for (const ch of shown) {
+    box.addSpacer(3);
+    const t = box.addText(changeText(ch));
+    t.font = Font.mediumSystemFont(11);
+    t.textColor = c.text;
+    t.lineLimit = 2;
+  }
+  if (changes.length > shown.length) {
+    box.addSpacer(3);
+    const more = box.addText(`ещё ${changes.length - shown.length}`);
+    more.font = Font.systemFont(10);
+    more.textColor = c.dim;
+  }
 }
 
-function dayCard(col, day, today, now, c) {
+// Арабская фраза дня из словаря.
+function phraseCard(col, phrase, c) {
+  col.addSpacer(8);
+  const box = col.addStack();
+  box.layoutVertically();
+  box.setPadding(7, 7, 8, 6);
+  box.cornerRadius = 10;
+  box.backgroundColor = c.card;
+
+  const head = box.addStack();
+  const h = head.addText("Фраза дня");
+  h.font = Font.semiboldSystemFont(10);
+  h.textColor = c.dim;
+  head.addSpacer();
+
+  box.addSpacer(3);
+  const arRow = box.addStack();
+  arRow.addSpacer();
+  const a = arRow.addText(phrase.ar);
+  a.font = Font.semiboldSystemFont(16);
+  a.textColor = c.text;
+  a.lineLimit = 2;
+  a.minimumScaleFactor = 0.7;
+  a.rightAlignText();
+
+  box.addSpacer(3);
+  const r = box.addText(phrase.ru);
+  r.font = Font.systemFont(11);
+  r.textColor = c.dim;
+  r.lineLimit = 2;
+}
+
+function dayCard(col, day, today, now, c, changes = []) {
   const isToday = day.date === today;
   const past = day.date < today;
   const d = toDate(day.date, "00:00");
@@ -492,11 +592,12 @@ function dayCard(col, day, today, now, c) {
     line.centerAlignContent();
     const t = line.addText(l.start);
     t.font = Font.mediumMonospacedSystemFont(10);
-    t.textColor = going ? c.now : c.dim;
+    const changed = isChanged(changes, l);
+    t.textColor = going ? c.now : changed ? c.accent : c.dim;
     line.addSpacer(4);
     const name = line.addText(withKind(l.short, l.kind));
     name.font = Font.mediumSystemFont(11.5);
-    name.textColor = going ? c.now : done ? c.dim : c.text;
+    name.textColor = going ? c.now : changed ? c.accent : done ? c.dim : c.text;
     name.lineLimit = 1;
     line.addSpacer();
     if (l.room) {
