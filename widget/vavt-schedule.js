@@ -137,6 +137,11 @@ const SHORT = [
   ["Теория вероятностей", "Теорвер"],
 ];
 
+// Тип занятия в скобках, как в расписании вуза: (л), (с), (ПЗ).
+function withKind(title, kind) {
+  return kind ? `${title} (${kind})` : title;
+}
+
 function shortTitle(title) {
   for (const [from, to] of SHORT) if (title.startsWith(from)) return to;
   return title;
@@ -190,7 +195,7 @@ function splitColumns(days) {
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
+  module.exports = { withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
 } else {
   await run();
 }
@@ -343,7 +348,7 @@ function renderDay(w, lessons, now, c, data, family) {
     row.addSpacer(8);
     const col = row.addStack();
     col.layoutVertically();
-    const t = col.addText(l.title);
+    const t = col.addText(withKind(l.title, l.kind));
     t.font = going ? Font.boldSystemFont(12) : Font.mediumSystemFont(12);
     t.textColor = done ? c.dim : c.text;
     t.lineLimit = 1;
@@ -436,7 +441,7 @@ function dayCard(col, day, today, now, c) {
     t.font = Font.semiboldMonospacedSystemFont(11);
     t.textColor = going ? c.now : c.dim;
     line.addSpacer(6);
-    const name = line.addText(l.short);
+    const name = line.addText(withKind(l.short, l.kind));
     name.font = going ? Font.boldSystemFont(12) : Font.mediumSystemFont(12);
     name.textColor = going ? c.now : done ? c.dim : c.text;
     name.lineLimit = 1;
