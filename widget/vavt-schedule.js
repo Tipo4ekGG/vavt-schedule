@@ -239,8 +239,8 @@ function phraseFor(phrases, now) {
 }
 
 // Делит дни на два столбца так, чтобы по высоте (строки + заголовки) они были примерно равны.
-function splitColumns(days) {
-  const h = (d) => d.items.length + 1.4;
+function splitColumns(days, today = "") {
+  const h = (d) => (d.date < today ? 1 : d.items.length + 1.4);
   const total = days.reduce((s, d) => s + h(d), 0);
   let acc = 0, cut = days.length;
   for (let i = 0; i < days.length; i++) {
@@ -307,7 +307,8 @@ function colors() {
     accent: Color.dynamic(new Color("#B23A2E"), new Color("#F07A6A")),
     now: Color.dynamic(new Color("#1F6F5C"), new Color("#5BD1B0")),
     card: Color.dynamic(new Color("#FFFFFF", 0.75), new Color("#FFFFFF", 0.06)),
-    todayBg: Color.dynamic(new Color("#B23A2E", 0.10), new Color("#F07A6A", 0.16)),
+    todayBg: Color.dynamic(new Color("#B23A2E", 0.07), new Color("#F07A6A", 0.08)),
+    todayBorder: Color.dynamic(new Color("#B23A2E", 0.55), new Color("#F07A6A", 0.6)),
   };
 }
 
@@ -471,11 +472,11 @@ function renderWeek(w, now, c, data, family, changes = [], phrase = null) {
   w.addSpacer(8);
 
   const today = isoOf(now);
-  const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days) : [week.days];
+  const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days, today) : [week.days];
   const row = w.addStack();
   row.topAlignContent();
   // отсчёт ставим под более короткий столбец (обычно — под субботой)
-  const heightOf = (days) => days.reduce((s, d) => s + d.items.length + 1.4, 0);
+  const heightOf = (days) => days.reduce((s, d) => s + (d.date < today ? 1 : d.items.length + 1.4), 0);
   const shortest = cols.length > 1 && heightOf(cols[1]) <= heightOf(cols[0]) ? 1 : 0;
 
   cols.forEach((days, i) => {
@@ -483,8 +484,9 @@ function renderWeek(w, now, c, data, family, changes = [], phrase = null) {
     const col = row.addStack();
     col.layoutVertically();
     days.forEach((day, j) => {
-      if (j > 0) col.addSpacer(8);
-      dayCard(col, day, today, now, c, changes);
+      if (j > 0) col.addSpacer(9);
+      if (day.date < today) pastCard(col, day, c);
+      else dayCard(col, day, today, now, c, changes);
     });
     if (i === shortest) {
       if (changes.length) changesCard(col, changes, c);
@@ -525,36 +527,56 @@ function changesCard(col, changes, c) {
   }
 }
 
-// Арабская фраза дня из словаря.
+// Арабская фраза дня из словаря — по центру, как открытка.
+function centered(box, text, font, color) {
+  const r = box.addStack();
+  r.addSpacer();
+  const t = r.addText(text);
+  t.font = font;
+  t.textColor = color;
+  t.lineLimit = 2;
+  t.centerAlignText();
+  r.addSpacer();
+  return t;
+}
+
 function phraseCard(col, phrase, c) {
-  col.addSpacer(8);
+  col.addSpacer(9);
   const box = col.addStack();
   box.layoutVertically();
-  box.setPadding(7, 7, 8, 6);
+  box.setPadding(8, 8, 10, 8);
   box.cornerRadius = 10;
   box.backgroundColor = c.card;
-
-  const head = box.addStack();
-  const h = head.addText("Фраза дня");
-  h.font = Font.semiboldSystemFont(10);
-  h.textColor = c.dim;
-  head.addSpacer();
-
-  box.addSpacer(3);
-  const arRow = box.addStack();
-  arRow.addSpacer();
-  const a = arRow.addText(phrase.ar);
-  a.font = Font.semiboldSystemFont(16);
-  a.textColor = c.text;
-  a.lineLimit = 2;
+  centered(box, "ФРАЗА ДНЯ", Font.semiboldSystemFont(9), c.dim);
+  box.addSpacer(4);
+  const a = centered(box, phrase.ar, Font.semiboldSystemFont(18), c.text);
   a.minimumScaleFactor = 0.7;
-  a.rightAlignText();
-
   box.addSpacer(3);
-  const r = box.addText(phrase.ru);
-  r.font = Font.systemFont(11);
-  r.textColor = c.dim;
-  r.lineLimit = 2;
+  centered(box, phrase.ru, Font.systemFont(11), c.dim);
+}
+
+// Прошедший день — одной строкой.
+function pastCard(col, day, c) {
+  const d = toDate(day.date, "00:00");
+  const card = col.addStack();
+  card.setPadding(6, 8, 6, 7);
+  card.cornerRadius = 10;
+  card.backgroundColor = c.card;
+  card.centerAlignContent();
+  const wd = card.addText(day.weekday.toUpperCase());
+  wd.font = Font.heavySystemFont(12);
+  wd.textColor = c.dim;
+  card.addSpacer(5);
+  const dt = card.addText(`${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`);
+  dt.font = Font.mediumSystemFont(11);
+  dt.textColor = c.dim;
+  card.addSpacer();
+  const n = day.items.length;
+  const x = n % 10, y = n % 100;
+  const word = x === 1 && y !== 11 ? "пара" : x >= 2 && x <= 4 && (y < 12 || y > 14) ? "пары" : "пар";
+  const t = card.addText(`${n} ${word} ✓`);
+  t.font = Font.mediumSystemFont(10);
+  t.textColor = c.dim;
 }
 
 function dayCard(col, day, today, now, c, changes = []) {
@@ -564,9 +586,13 @@ function dayCard(col, day, today, now, c, changes = []) {
 
   const card = col.addStack();
   card.layoutVertically();
-  card.setPadding(6, 7, 7, 6);
+  card.setPadding(7, 8, 8, 7);
   card.cornerRadius = 10;
   card.backgroundColor = isToday ? c.todayBg : c.card;
+  if (isToday) {
+    card.borderColor = c.todayBorder;
+    card.borderWidth = 1.5;
+  }
 
   const head = card.addStack();
   head.centerAlignContent();
@@ -583,21 +609,21 @@ function dayCard(col, day, today, now, c, changes = []) {
     n.font = Font.mediumSystemFont(9);
     n.textColor = c.dim;
   }
-  card.addSpacer(4);
+  card.addSpacer(5);
 
   day.items.forEach((l, k) => {
-    if (k > 0) card.addSpacer(3);
+    if (k > 0) card.addSpacer(4);
     const done = l.to <= now;
     const going = l.from <= now && !done;
     const line = card.addStack();
     line.centerAlignContent();
     const t = line.addText(l.start);
-    t.font = Font.mediumMonospacedSystemFont(10);
+    t.font = Font.mediumMonospacedSystemFont(10.5);
     const changed = isChanged(changes, l);
     t.textColor = going ? c.now : changed ? c.accent : c.dim;
     line.addSpacer(4);
     const name = line.addText(withKind(l.short, l.kind));
-    name.font = Font.mediumSystemFont(11.5);
+    name.font = Font.mediumSystemFont(12);
     name.textColor = going ? c.now : changed ? c.accent : done ? c.dim : c.text;
     name.lineLimit = 1;
     line.addSpacer();
