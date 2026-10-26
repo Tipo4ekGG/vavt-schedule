@@ -393,7 +393,7 @@ function renderWeek(w, now, c, data, family) {
   const row = w.addStack();
   row.topAlignContent();
   cols.forEach((days, i) => {
-    if (i > 0) row.addSpacer(8);
+    if (i > 0) row.addSpacer(6);
     const col = row.addStack();
     col.layoutVertically();
     days.forEach((day, j) => {
@@ -411,7 +411,7 @@ function dayCard(col, day, today, now, c) {
 
   const card = col.addStack();
   card.layoutVertically();
-  card.setPadding(6, 8, 7, 8);
+  card.setPadding(6, 7, 7, 6);
   card.cornerRadius = 10;
   card.backgroundColor = isToday ? c.todayBg : c.card;
 
@@ -439,18 +439,18 @@ function dayCard(col, day, today, now, c) {
     const line = card.addStack();
     line.centerAlignContent();
     const t = line.addText(l.start);
-    t.font = Font.semiboldMonospacedSystemFont(11);
+    t.font = Font.mediumMonospacedSystemFont(10);
     t.textColor = going ? c.now : c.dim;
-    line.addSpacer(6);
+    line.addSpacer(4);
     const name = line.addText(withKind(l.short, l.kind));
-    name.font = going ? Font.boldSystemFont(12) : Font.mediumSystemFont(12);
+    name.font = Font.mediumSystemFont(11.5);
     name.textColor = going ? c.now : done ? c.dim : c.text;
     name.lineLimit = 1;
     line.addSpacer();
     if (l.room) {
-      line.addSpacer(4);
+      line.addSpacer(3);
       const r = line.addText(l.room);
-      r.font = Font.systemFont(10);
+      r.font = Font.systemFont(9);
       r.textColor = c.dim;
       r.lineLimit = 1;
     }
