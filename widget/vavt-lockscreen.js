@@ -205,60 +205,65 @@ async function run() {
   Script.complete();
 }
 
+// Прямоугольный виджет прижат к правому краю — зеркально к виджету с парами слева.
+// Каждая строка — горизонтальный стек с распоркой слева.
+function rightRow(w) {
+  const r = w.addStack();
+  r.centerAlignContent();
+  r.addSpacer();
+  return r;
+}
+
+function rightText(w, text, font, opacity) {
+  const t = rightRow(w).addText(text);
+  t.font = font;
+  t.lineLimit = 1;
+  t.rightAlignText();
+  if (opacity) t.textOpacity = opacity;
+  return t;
+}
+
 function rectangular(w, st, now) {
   w.setPadding(0, 0, 0, 0);
   if (st.kind === "error") {
-    w.addText("Нет данных расписания").font = Font.semiboldSystemFont(13);
+    rightText(w, "Нет данных расписания", Font.semiboldSystemFont(13));
+    w.addSpacer();
     return;
   }
   if (st.kind === "none") {
-    w.addText("Пар больше нет").font = Font.semiboldSystemFont(14);
+    rightText(w, "Пар больше нет", Font.semiboldSystemFont(14));
+    w.addSpacer();
     return;
   }
   if (st.kind === "word") { wordRect(w, st.word); w.addSpacer(); return; }
   const l = st.lesson;
-  const top = w.addText(
-    st.kind === "going" ? "До конца пары" :
-    st.kind === "break" ? "До начала пары" :
-    `Сегодня в ${l.start}`
-  );
-  top.font = Font.semiboldSystemFont(11);
-  top.textOpacity = 0.75;
+  rightText(w, st.kind === "going" ? "До конца пары" : "До начала пары", Font.semiboldSystemFont(11), 0.75);
 
-  if (st.target) {
-    const t = w.addDate(st.target);
-    t.applyTimerStyle();
-    t.font = Font.boldMonospacedSystemFont(24);
-    t.lineLimit = 1;
-    t.minimumScaleFactor = 0.8;
-  }
+  const t = rightRow(w).addDate(st.target);
+  t.applyTimerStyle();
+  t.font = Font.boldMonospacedSystemFont(24);
+  t.lineLimit = 1;
+  t.minimumScaleFactor = 0.8;
+  t.rightAlignText();
 
-  const row = w.addStack();
-  row.centerAlignContent();
-  const n = row.addText(label(l));
-  n.font = Font.mediumSystemFont(st.target ? 12 : 16);
-  n.lineLimit = 1;
+  const row = rightRow(w);
   if (l.room) {
-    row.addSpacer(4);
     const r = row.addText(l.room);
     r.font = Font.systemFont(10);
     r.textOpacity = 0.75;
+    row.addSpacer(4);
   }
-  row.addSpacer();
+  const n = row.addText(label(l));
+  n.font = Font.mediumSystemFont(12);
+  n.lineLimit = 1;
   w.addSpacer(); // прижать к верху — на одной линии с соседним виджетом
 }
 
 function wordRect(w, word) {
-  const h = w.addText("Арабское слово");
-  h.font = Font.semiboldSystemFont(11);
-  h.textOpacity = 0.75;
-  const a = w.addText(word.ar);
-  a.font = Font.boldSystemFont(22);
-  a.lineLimit = 1;
+  rightText(w, "Арабское слово", Font.semiboldSystemFont(11), 0.75);
+  const a = rightText(w, word.ar, Font.boldSystemFont(22));
   a.minimumScaleFactor = 0.5;
-  const r = w.addText(word.ru);
-  r.font = Font.mediumSystemFont(12);
-  r.lineLimit = 1;
+  const r = rightText(w, word.ru, Font.mediumSystemFont(12));
   r.minimumScaleFactor = 0.8;
 }
 
