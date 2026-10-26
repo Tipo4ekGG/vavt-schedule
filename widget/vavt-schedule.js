@@ -8,7 +8,7 @@
 //   "next"  — следующая пара крупно (по умолчанию для маленького виджета)
 //   "today" — список пар на сегодня (по умолчанию для среднего и большого)
 
-const DATA_URL = "https://raw.githubusercontent.com/tipo4ekgg/vavt-schedule/main/data/schedule.json";
+const DATA_URL = "https://raw.githubusercontent.com/Tipo4ekGG/vavt-schedule/main/data/schedule.json";
 
 const KIND = { "л": "лекция", "с": "семинар", "ПЗ": "практика", "лаб": "лаб." };
 const WD = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
