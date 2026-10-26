@@ -238,9 +238,32 @@ function phraseFor(phrases, now) {
   return phrases[((day * 2654435761) % 4294967296) % phrases.length];
 }
 
+// Высоты в пунктах, замерены по скриншоту большого виджета.
+const FIT = { avail: 305, row: 16.5, card: 26, past: 24, gap: 9, phrase: 72 };
+
+function colHeight(days) {
+  return days.reduce((s, d, i) => s + (i ? FIT.gap : 0) + (d.collapsed ? FIT.past : FIT.card + FIT.row * d.items.length), 0);
+}
+
+// Сворачивать прошедшие дни (начиная с самых старых), только если неделя не влезает.
+function fitWeek(days, today) {
+  days.forEach((d) => (d.collapsed = false));
+  const fits = () => {
+    const [a, b] = splitColumns(days);
+    const ha = colHeight(a), hb = colHeight(b);
+    // под коротким столбцом стоит карточка фразы/изменений
+    return Math.max(ha, hb) <= FIT.avail && Math.min(ha, hb) + FIT.gap + FIT.phrase <= FIT.avail;
+  };
+  for (const d of days) {
+    if (fits()) break;
+    if (d.date < today) d.collapsed = true;
+  }
+  return days;
+}
+
 // Делит дни на два столбца так, чтобы по высоте (строки + заголовки) они были примерно равны.
-function splitColumns(days, today = "") {
-  const h = (d) => (d.date < today ? 1 : d.items.length + 1.4);
+function splitColumns(days) {
+  const h = (d) => (d.collapsed ? 1 : d.items.length + 1.4);
   const total = days.reduce((s, d) => s + h(d), 0);
   let acc = 0, cut = days.length;
   for (let i = 0; i < days.length; i++) {
@@ -254,7 +277,7 @@ function splitColumns(days, today = "") {
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { activeChanges, changeText, isChanged, parsePhrases, phraseFor, withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
+  module.exports = { fitWeek, colHeight, activeChanges, changeText, isChanged, parsePhrases, phraseFor, withKind, flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
 } else {
   await run();
 }
@@ -472,11 +495,13 @@ function renderWeek(w, now, c, data, family, changes = [], phrase = null) {
   w.addSpacer(8);
 
   const today = isoOf(now);
-  const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days, today) : [week.days];
+  const two = family === "large" || family === "extraLarge";
+  if (two) fitWeek(week.days, today);
+  const cols = two ? splitColumns(week.days) : [week.days];
   const row = w.addStack();
   row.topAlignContent();
   // отсчёт ставим под более короткий столбец (обычно — под субботой)
-  const heightOf = (days) => days.reduce((s, d) => s + (d.date < today ? 1 : d.items.length + 1.4), 0);
+  const heightOf = (days) => days.reduce((s, d) => s + (d.collapsed ? 1 : d.items.length + 1.4), 0);
   const shortest = cols.length > 1 && heightOf(cols[1]) <= heightOf(cols[0]) ? 1 : 0;
 
   cols.forEach((days, i) => {
@@ -485,7 +510,7 @@ function renderWeek(w, now, c, data, family, changes = [], phrase = null) {
     col.layoutVertically();
     days.forEach((day, j) => {
       if (j > 0) col.addSpacer(9);
-      if (day.date < today) pastCard(col, day, c);
+      if (day.collapsed) pastCard(col, day, c);
       else dayCard(col, day, today, now, c, changes);
     });
     if (i === shortest) {
