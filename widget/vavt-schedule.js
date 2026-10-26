@@ -15,6 +15,9 @@ const DATA_URLS = [
   "https://cdn.jsdelivr.net/gh/Tipo4ekGG/vavt-schedule@main/data/schedule.json",
 ];
 
+// Пары, которые не показывать (ищется по началу названия). Допиши сюда, если что-то ещё не нужно.
+const HIDE = ["Русский как иностранный"];
+
 const KIND = { "л": "лекция", "с": "семинар", "ПЗ": "практика", "лаб": "лаб." };
 const WD = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 const WD_FULL = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
@@ -38,6 +41,7 @@ function flatten(data) {
   for (const week of data.weeks || []) {
     for (const day of week.days || []) {
       for (const l of day.lessons || []) {
+        if (HIDE.some((h) => (l.title || l.raw || "").startsWith(h))) continue;
         out.push({ ...l, date: day.date, note: day.note, from: toDate(day.date, l.start), to: toDate(day.date, l.end) });
       }
     }
@@ -121,7 +125,7 @@ const SHORT = [
   ["Линейная алгебра", "Линал"],
   ["Микроэкономика", "Микроэк."],
   ["Макроэкономика", "Макроэк."],
-  ["Экономико-географические", "Эк.-геогр. аспекты"],
+  ["Экономико-географические", "Экон. география"],
   ["Социально-психологическое", "Соц.-псих. тест"],
   ["История России", "История"],
   ["Правоведение", "Право"],
@@ -134,7 +138,6 @@ function shortTitle(title) {
 }
 
 // Неделя, к которой относится ближайшая пара (или последняя, если пар больше нет).
-// Подряд идущие одинаковые пары (то же название, тип и аудитория) склеиваются.
 function weekView(data, now) {
   const lessons = flatten(data);
   const next = upcoming(lessons, now)[0];
@@ -142,18 +145,12 @@ function weekView(data, now) {
   let week = weeks[weeks.length - 1];
   if (next) week = weeks.find((w) => (w.days || []).some((d) => d.date === next.date)) || week;
   if (!week) return null;
-  const days = (week.days || []).map((day) => {
-    const items = [];
-    for (const l of lessons.filter((x) => x.date === day.date)) {
-      const prev = items[items.length - 1];
-      if (prev && prev.title === l.title && prev.kind === l.kind && prev.room === l.room) {
-        prev.count += 1; prev.end = l.end; prev.to = l.to;
-      } else {
-        items.push({ ...l, short: shortTitle(l.title), count: 1 });
-      }
-    }
-    return { ...day, items };
-  });
+  const days = (week.days || [])
+    .map((day) => ({
+      ...day,
+      items: lessons.filter((x) => x.date === day.date).map((l) => ({ ...l, short: shortTitle(l.title) })),
+    }))
+    .filter((d) => d.items.length);
   return { start: week.start, end: week.end, days };
 }
 
@@ -205,6 +202,8 @@ function colors() {
     dim: Color.dynamic(new Color("#6B6B73"), new Color("#9A9AA5")),
     accent: Color.dynamic(new Color("#B23A2E"), new Color("#F07A6A")),
     now: Color.dynamic(new Color("#1F6F5C"), new Color("#5BD1B0")),
+    card: Color.dynamic(new Color("#FFFFFF", 0.75), new Color("#FFFFFF", 0.06)),
+    todayBg: Color.dynamic(new Color("#B23A2E", 0.10), new Color("#F07A6A", 0.16)),
   };
 }
 
@@ -359,55 +358,78 @@ function renderWeek(w, now, c, data, family) {
     w.addSpacer();
     return;
   }
-  w.setPadding(12, 12, 10, 12);
-  header(w, `Неделя ${week.start.slice(0, 5)} — ${week.end.slice(0, 5)}`, data.group.replace(/^Б\d+М-/, ""), c);
-  w.addSpacer(6);
+  w.setPadding(14, 12, 12, 12);
+  header(w, `${week.start.slice(0, 5)} — ${week.end.slice(0, 5)}`, data.group.replace(/^Б\d+М-/, ""), c);
+  w.addSpacer(8);
 
   const today = isoOf(now);
   const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days) : [week.days];
   const row = w.addStack();
   row.topAlignContent();
   cols.forEach((days, i) => {
-    if (i > 0) row.addSpacer(10);
+    if (i > 0) row.addSpacer(8);
     const col = row.addStack();
     col.layoutVertically();
-    for (const day of days) {
-      const past = day.date < today;
-      const isToday = day.date === today;
-      const d = toDate(day.date, "00:00");
-      const h = col.addText(`${day.weekday} ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}${day.note ? " · " + day.note : ""}${isToday ? " · сегодня" : ""}`);
-      h.font = Font.boldSystemFont(11);
-      h.textColor = isToday ? c.accent : past ? c.dim : c.text;
-      h.lineLimit = 1;
-      col.addSpacer(2);
-      for (const l of day.items) {
-        const done = l.to <= now;
-        const going = l.from <= now && !done;
-        const line = col.addStack();
-        line.centerAlignContent();
-        const t = line.addText(l.start);
-        t.font = Font.mediumMonospacedSystemFont(10);
-        t.textColor = going ? c.now : done ? c.dim : c.dim;
-        line.addSpacer(5);
-        const name = line.addText(l.short + (l.count > 1 ? ` ×${l.count}` : ""));
-        name.font = going ? Font.boldSystemFont(11) : Font.systemFont(11);
-        name.textColor = going ? c.now : done ? c.dim : c.text;
-        name.lineLimit = 1;
-        name.minimumScaleFactor = 0.8;
-        if (l.room) {
-          line.addSpacer(4);
-          const r = line.addText(l.room);
-          r.font = Font.systemFont(9);
-          r.textColor = c.dim;
-          r.lineLimit = 1;
-        }
-        line.addSpacer();
-        col.addSpacer(1);
-      }
-      col.addSpacer(5);
-    }
+    days.forEach((day, j) => {
+      if (j > 0) col.addSpacer(8);
+      dayCard(col, day, today, now, c);
+    });
   });
   w.addSpacer();
+}
+
+function dayCard(col, day, today, now, c) {
+  const isToday = day.date === today;
+  const past = day.date < today;
+  const d = toDate(day.date, "00:00");
+
+  const card = col.addStack();
+  card.layoutVertically();
+  card.setPadding(6, 8, 7, 8);
+  card.cornerRadius = 10;
+  card.backgroundColor = isToday ? c.todayBg : c.card;
+
+  const head = card.addStack();
+  head.centerAlignContent();
+  const wd = head.addText(day.weekday.toUpperCase());
+  wd.font = Font.heavySystemFont(12);
+  wd.textColor = isToday ? c.accent : past ? c.dim : c.text;
+  head.addSpacer(5);
+  const dt = head.addText(`${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`);
+  dt.font = Font.mediumSystemFont(11);
+  dt.textColor = c.dim;
+  head.addSpacer();
+  if (day.note) {
+    const n = head.addText(day.note);
+    n.font = Font.mediumSystemFont(9);
+    n.textColor = c.dim;
+  }
+  card.addSpacer(4);
+
+  day.items.forEach((l, k) => {
+    if (k > 0) card.addSpacer(3);
+    const done = l.to <= now;
+    const going = l.from <= now && !done;
+    const line = card.addStack();
+    line.centerAlignContent();
+    const t = line.addText(l.start);
+    t.font = Font.semiboldMonospacedSystemFont(11);
+    t.textColor = going ? c.now : c.dim;
+    line.addSpacer(6);
+    const name = line.addText(l.short);
+    name.font = going ? Font.boldSystemFont(12) : Font.mediumSystemFont(12);
+    name.textColor = going ? c.now : done ? c.dim : c.text;
+    name.lineLimit = 1;
+    name.minimumScaleFactor = 0.75;
+    line.addSpacer();
+    if (l.room) {
+      line.addSpacer(4);
+      const r = line.addText(l.room);
+      r.font = Font.systemFont(10);
+      r.textColor = c.dim;
+      r.lineLimit = 1;
+    }
+  });
 }
 
 async function finish(w, text, family) {
