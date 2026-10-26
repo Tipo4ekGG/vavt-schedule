@@ -6,7 +6,8 @@
 // Данные готовит GitHub Actions (папка parser/ в репозитории) и кладёт в data/schedule.json.
 // Параметр виджета (долгое нажатие → Изменить виджет → Parameter) можно не задавать.
 //   "next"  — следующая пара крупно (по умолчанию для маленького виджета)
-//   "today" — список пар на сегодня (по умолчанию для среднего и большого)
+//   "today" — список пар на сегодня (по умолчанию для среднего)
+//   "week"  — вся неделя в два столбца (по умолчанию для большого)
 
 // Основной адрес и запасной (jsDelivr) — на случай, если GitHub недоступен у провайдера.
 const DATA_URLS = [
@@ -109,10 +110,70 @@ function asText(lessons, now) {
   }).join("\n\n");
 }
 
+// Короткие названия для недельного вида (ищется по началу названия).
+const SHORT = [
+  ["Иностранный язык (второй)", "Ин. яз (2-й)"],
+  ["Иностранный язык", "Ин. яз"],
+  ["Русский как иностранный", "РКИ"],
+  ["Физическая культура", "Физра"],
+  ["Элективные курсы по физической", "Физра"],
+  ["Математический анализ", "Матан"],
+  ["Линейная алгебра", "Линал"],
+  ["Микроэкономика", "Микроэк."],
+  ["Макроэкономика", "Макроэк."],
+  ["Экономико-географические", "Эк.-геогр. аспекты"],
+  ["Социально-психологическое", "Соц.-псих. тест"],
+  ["История России", "История"],
+  ["Правоведение", "Право"],
+  ["Теория вероятностей", "Теорвер"],
+];
+
+function shortTitle(title) {
+  for (const [from, to] of SHORT) if (title.startsWith(from)) return to;
+  return title;
+}
+
+// Неделя, к которой относится ближайшая пара (или последняя, если пар больше нет).
+// Подряд идущие одинаковые пары (то же название, тип и аудитория) склеиваются.
+function weekView(data, now) {
+  const lessons = flatten(data);
+  const next = upcoming(lessons, now)[0];
+  const weeks = data.weeks || [];
+  let week = weeks[weeks.length - 1];
+  if (next) week = weeks.find((w) => (w.days || []).some((d) => d.date === next.date)) || week;
+  if (!week) return null;
+  const days = (week.days || []).map((day) => {
+    const items = [];
+    for (const l of lessons.filter((x) => x.date === day.date)) {
+      const prev = items[items.length - 1];
+      if (prev && prev.title === l.title && prev.kind === l.kind && prev.room === l.room) {
+        prev.count += 1; prev.end = l.end; prev.to = l.to;
+      } else {
+        items.push({ ...l, short: shortTitle(l.title), count: 1 });
+      }
+    }
+    return { ...day, items };
+  });
+  return { start: week.start, end: week.end, days };
+}
+
+// Делит дни на два столбца так, чтобы по высоте (строки + заголовки) они были примерно равны.
+function splitColumns(days) {
+  const h = (d) => d.items.length + 1.4;
+  const total = days.reduce((s, d) => s + h(d), 0);
+  let acc = 0, cut = days.length;
+  for (let i = 0; i < days.length; i++) {
+    if (acc + h(days[i]) / 2 > total / 2) { cut = i; break; }
+    acc += h(days[i]);
+  }
+  if (cut === 0) cut = 1;
+  return [days.slice(0, cut), days.slice(cut)];
+}
+
 // ------------------------------------------------------------ Scriptable
 
 if (typeof ListWidget === "undefined") {
-  module.exports = { flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf };
+  module.exports = { flatten, upcoming, dayToShow, relTime, dayTitle, nextRefresh, meta, asText, toDate, isoOf, weekView, splitColumns, shortTitle };
 } else {
   await run();
 }
@@ -149,9 +210,9 @@ function colors() {
 
 async function run() {
   const now = new Date();
-  const family = config.widgetFamily || "medium";
+  const family = config.widgetFamily || (config.runsInApp ? "large" : "medium");
   const param = (args.widgetParameter || "").trim().toLowerCase();
-  const mode = param || (family === "small" ? "next" : "today");
+  const mode = param || (family === "small" ? "next" : family === "large" ? "week" : "today");
   const c = colors();
 
   let data, stale = false, error = null;
@@ -171,7 +232,7 @@ async function run() {
     const e = w.addText(error);
     e.font = Font.systemFont(10); e.textColor = c.dim;
     w.refreshAfterDate = new Date(now.getTime() + 30 * 60000);
-    return finish(w, null);
+    return finish(w, null, family);
   }
 
   const lessons = flatten(data);
@@ -179,6 +240,7 @@ async function run() {
   w.url = data.source || "https://www.vavt.ru/schedule/";
 
   if (mode === "next") renderNext(w, lessons, now, c, data);
+  else if (mode === "week") renderWeek(w, now, c, data, family);
   else renderDay(w, lessons, now, c, data, family);
 
   if (stale) {
@@ -186,7 +248,7 @@ async function run() {
     const s = w.addText("нет сети — показан кеш");
     s.font = Font.systemFont(9); s.textColor = c.dim;
   }
-  return finish(w, asText(lessons, now));
+  return finish(w, asText(lessons, now), family);
 }
 
 function header(w, left, right, c) {
@@ -287,19 +349,81 @@ function renderDay(w, lessons, now, c, data, family) {
   w.addSpacer();
 }
 
-async function finish(w, text) {
+function renderWeek(w, now, c, data, family) {
+  const week = weekView(data, now);
+  if (!week || !week.days.length) {
+    header(w, data.group, null, c);
+    w.addSpacer();
+    const t = w.addText("Пар на неделе нет");
+    t.font = Font.semiboldSystemFont(14); t.textColor = c.text;
+    w.addSpacer();
+    return;
+  }
+  w.setPadding(12, 12, 10, 12);
+  header(w, `Неделя ${week.start.slice(0, 5)} — ${week.end.slice(0, 5)}`, data.group.replace(/^Б\d+М-/, ""), c);
+  w.addSpacer(6);
+
+  const today = isoOf(now);
+  const cols = family === "large" || family === "extraLarge" ? splitColumns(week.days) : [week.days];
+  const row = w.addStack();
+  row.topAlignContent();
+  cols.forEach((days, i) => {
+    if (i > 0) row.addSpacer(10);
+    const col = row.addStack();
+    col.layoutVertically();
+    for (const day of days) {
+      const past = day.date < today;
+      const isToday = day.date === today;
+      const d = toDate(day.date, "00:00");
+      const h = col.addText(`${day.weekday} ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}${day.note ? " · " + day.note : ""}${isToday ? " · сегодня" : ""}`);
+      h.font = Font.boldSystemFont(11);
+      h.textColor = isToday ? c.accent : past ? c.dim : c.text;
+      h.lineLimit = 1;
+      col.addSpacer(2);
+      for (const l of day.items) {
+        const done = l.to <= now;
+        const going = l.from <= now && !done;
+        const line = col.addStack();
+        line.centerAlignContent();
+        const t = line.addText(l.start);
+        t.font = Font.mediumMonospacedSystemFont(10);
+        t.textColor = going ? c.now : done ? c.dim : c.dim;
+        line.addSpacer(5);
+        const name = line.addText(l.short + (l.count > 1 ? ` ×${l.count}` : ""));
+        name.font = going ? Font.boldSystemFont(11) : Font.systemFont(11);
+        name.textColor = going ? c.now : done ? c.dim : c.text;
+        name.lineLimit = 1;
+        name.minimumScaleFactor = 0.8;
+        if (l.room) {
+          line.addSpacer(4);
+          const r = line.addText(l.room);
+          r.font = Font.systemFont(9);
+          r.textColor = c.dim;
+          r.lineLimit = 1;
+        }
+        line.addSpacer();
+        col.addSpacer(1);
+      }
+      col.addSpacer(5);
+    }
+  });
+  w.addSpacer();
+}
+
+async function finish(w, text, family) {
+  const preview = () => (family === "large" ? w.presentLarge() : family === "small" ? w.presentSmall() : w.presentMedium());
   if (config.runsInWidget) {
     Script.setWidget(w);
   } else if (text !== null && config.runsInApp && !args.widgetParameter) {
     // Запуск из приложения: превью виджета + вся неделя текстом.
-    await w.presentMedium();
+    await preview();
     const a = new Alert();
     a.title = "Расписание";
     a.message = text || "Пар нет";
     a.addAction("OK");
     await a.present();
   } else {
-    await w.presentMedium();
+    await preview();
   }
   Script.complete();
 }
