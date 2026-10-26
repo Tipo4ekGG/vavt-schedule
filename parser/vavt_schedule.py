@@ -27,7 +27,8 @@ TIME_RE = re.compile(r"^(\d{1,2})[.:](\d{2})\s*[-–—]\s*(\d{1,2})[.:](\d{2})$
 DAY_RE = re.compile(r"^(Пн|Вт|Ср|Чт|Пт|Сб|Вс)\s+(\d{1,2})\.(\d{1,2})\s*(.*)$")
 RANGE_RE = re.compile(r"(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})")
 TYPE_RE = re.compile(r"\((л|с|пз|ПЗ|лаб|сем)\)", re.I)
-ROOM_RE = re.compile(r"Ауд\.?\s*([\dА-Яа-яA-Za-z][\w.\-/ ]*?)\s*$")
+GROUP_HDR_RE = re.compile(r"^Б\d+[А-ЯA-Z]*-[^.]+\.\d+$")
+ROOM_RE =re.compile(r"Ауд\.?\s*([\dА-Яа-яA-Za-z][\w.\-/ ]*?)\s*$")
 
 
 # ---------------------------------------------------------------- загрузка
@@ -211,7 +212,35 @@ def _parse_table(page, table, gkey: str, year: int, days: dict) -> None:
                 found = m
         return found
 
-    # 4) ячейки занятий, пересекающие столбец группы
+    # 4) столбцы всех групп таблицы — чтобы понимать, на сколько групп растянута ячейка
+    group_cols = []
+    for c in cells:
+        if GROUP_HDR_RE.match(group_key(text_of(c))):
+            group_cols.append((c[0], c[2]))
+
+    def span_of(c):
+        return sum(1 for g in group_cols if _overlap(c[0], c[2], g[0], g[1]))
+
+    other_cells = [
+        (c, parse_lesson(text_of(c)))
+        for c in cells
+        if c[0] >= (time_x or 0) - 1 and not _overlap(c[0], c[2], gcol[0], gcol[1])
+    ]
+
+    def fix_kind(cell, lesson):
+        """«(л)» в ячейке одной группы, если ни у кого больше в это время нет такой же лекции, — на деле семинар."""
+        if lesson["kind"] != "л" or len(group_cols) < 2 or span_of(cell) > 1:
+            return lesson
+        for oc, ol in other_cells:
+            if _overlap(oc[1], oc[3], cell[1], cell[3]) and ol["kind"] == "л" and ol["title"] == lesson["title"]:
+                return lesson
+        lesson = dict(lesson)
+        lesson["kind"] = "с"
+        lesson["kind_fixed"] = "в файле стояло (л), но лекции у других групп в это время нет"
+        lesson["raw"] = re.sub(r"\(л\)", "(с)", lesson["raw"], count=1)
+        return lesson
+
+    # 5) ячейки занятий, пересекающие столбец группы
     lesson_cells = []
     for c in cells:
         if c[0] < (time_x or 0) - 1:
@@ -228,14 +257,14 @@ def _parse_table(page, table, gkey: str, year: int, days: dict) -> None:
         dm = day_for(y0, y1)
         if not dm:
             continue
-        hits = [txt for c, txt in lesson_cells if _overlap(c[1], c[3], y0, y1)]
+        hits = [(c, txt) for c, txt in lesson_cells if _overlap(c[1], c[3], y0, y1)]
         if not hits:
             continue
         wd, dd, mm, note = dm.group(1), int(dm.group(2)), int(dm.group(3)), norm(dm.group(4))
         date = dt.date(year, mm, dd).isoformat()
         day = days.setdefault(date, {"date": date, "weekday": wd, "note": note or None, "lessons": []})
-        for txt in hits:
-            lesson = {"start": slot["start"], "end": slot["end"], **parse_lesson(txt)}
+        for c, txt in hits:
+            lesson = {"start": slot["start"], "end": slot["end"], **fix_kind(c, parse_lesson(txt))}
             if lesson not in day["lessons"]:
                 day["lessons"].append(lesson)
         day["lessons"].sort(key=lambda l: l["start"])
