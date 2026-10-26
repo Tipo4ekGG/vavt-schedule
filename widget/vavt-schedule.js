@@ -15,6 +15,12 @@ const DATA_URLS = [
   "https://cdn.jsdelivr.net/gh/Tipo4ekGG/vavt-schedule@main/data/schedule.json",
 ];
 
+// Словарь — для «Фразы дня».
+const DICT_URLS = [
+  "https://raw.githubusercontent.com/Tipo4ekGG/arab/main/index.html",
+  "https://cdn.jsdelivr.net/gh/Tipo4ekGG/arab@main/index.html",
+];
+
 // Пары, которые не показывать (ищется по началу названия). Допиши сюда, если что-то ещё не нужно.
 const HIDE = ["Русский как иностранный"];
 
@@ -272,11 +278,6 @@ async function loadData() {
   if (fm.fileExists(cache)) return { data: JSON.parse(fm.readString(cache)), stale: true };
   throw new Error(errors.join("\n"));
 }
-
-const DICT_URLS = [
-  "https://raw.githubusercontent.com/Tipo4ekGG/arab/main/index.html",
-  "https://cdn.jsdelivr.net/gh/Tipo4ekGG/arab@main/index.html",
-];
 
 // Фразы словаря; перекачиваются не чаще раза в сутки.
 async function loadPhrases() {
