@@ -8,7 +8,11 @@
 //   "next"  — следующая пара крупно (по умолчанию для маленького виджета)
 //   "today" — список пар на сегодня (по умолчанию для среднего и большого)
 
-const DATA_URL = "https://raw.githubusercontent.com/Tipo4ekGG/vavt-schedule/main/data/schedule.json";
+// Основной адрес и запасной (jsDelivr) — на случай, если GitHub недоступен у провайдера.
+const DATA_URLS = [
+  "https://raw.githubusercontent.com/Tipo4ekGG/vavt-schedule/main/data/schedule.json",
+  "https://cdn.jsdelivr.net/gh/Tipo4ekGG/vavt-schedule@main/data/schedule.json",
+];
 
 const KIND = { "л": "лекция", "с": "семинар", "ПЗ": "практика", "лаб": "лаб." };
 const WD = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -116,17 +120,21 @@ if (typeof ListWidget === "undefined") {
 async function loadData() {
   const fm = FileManager.local();
   const cache = fm.joinPath(fm.cacheDirectory(), "vavt-schedule.json");
-  try {
-    const req = new Request(DATA_URL + "?t=" + Date.now());
-    req.timeoutInterval = 15;
-    const data = await req.loadJSON();
-    if (!data || !data.weeks) throw new Error("пустой ответ");
-    fm.writeString(cache, JSON.stringify(data));
-    return { data, stale: false };
-  } catch (e) {
-    if (fm.fileExists(cache)) return { data: JSON.parse(fm.readString(cache)), stale: true };
-    throw e;
+  const errors = [];
+  for (const url of DATA_URLS) {
+    try {
+      const req = new Request(url + "?t=" + Date.now());
+      req.timeoutInterval = 12;
+      const data = await req.loadJSON();
+      if (!data || !data.weeks) throw new Error(`пустой ответ (HTTP ${req.response && req.response.statusCode})`);
+      fm.writeString(cache, JSON.stringify(data));
+      return { data, stale: false };
+    } catch (e) {
+      errors.push(`${url.split("/")[2]}: ${e.message || e}`);
+    }
   }
+  if (fm.fileExists(cache)) return { data: JSON.parse(fm.readString(cache)), stale: true };
+  throw new Error(errors.join("\n"));
 }
 
 function colors() {
