@@ -93,6 +93,10 @@ function nextRefresh(lessons, now) {
     if (l.from > now) marks.push(l.from);
     if (l.to > now) marks.push(l.to);
   }
+  // момент переключения недели (суббота 18:00)
+  const sw = new Date(now.getFullYear(), now.getMonth(), now.getDate(), SWITCH_HOUR, 0);
+  sw.setDate(sw.getDate() + ((SWITCH_WEEKDAY - now.getDay() + 7) % 7));
+  if (sw > now) marks.push(sw);
   marks.sort((a, b) => a - b);
   const soon = new Date(now.getTime() + 15 * 60000);
   const later = new Date(now.getTime() + 3 * 3600000);
@@ -137,13 +141,28 @@ function shortTitle(title) {
   return title;
 }
 
-// Неделя, к которой относится ближайшая пара (или последняя, если пар больше нет).
+// Когда переключаться на следующую неделю: суббота, 18:00.
+const SWITCH_WEEKDAY = 6;
+const SWITCH_HOUR = 18;
+
+function parseRu(s) {
+  const [d, m, y] = s.split(".").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Текущая неделя; с субботы 18:00 до конца воскресенья — следующая.
 function weekView(data, now) {
   const lessons = flatten(data);
-  const next = upcoming(lessons, now)[0];
   const weeks = data.weeks || [];
-  let week = weeks[weeks.length - 1];
-  if (next) week = weeks.find((w) => (w.days || []).some((d) => d.date === next.date)) || week;
+  const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const wd = now.getDay();
+  if ((wd === SWITCH_WEEKDAY && now.getHours() >= SWITCH_HOUR) || wd === 0) {
+    ref.setDate(ref.getDate() + ((8 - wd) % 7 || 7)); // ближайший понедельник
+  }
+  let week =
+    weeks.find((w) => parseRu(w.start) <= ref && ref <= parseRu(w.end)) ||
+    weeks.find((w) => parseRu(w.start) > ref) ||
+    weeks[weeks.length - 1];
   if (!week) return null;
   const days = (week.days || [])
     .map((day) => ({
