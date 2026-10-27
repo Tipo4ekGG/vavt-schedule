@@ -33,6 +33,8 @@ const SHORT = [
 ];
 
 const MAX_LINES = 3;
+// iOS обновляет виджет с опозданием — состояние меняется за 3 минуты заранее.
+const LEAD_MS = 3 * 60000;
 
 // ------------------------------------------------------------ логика
 
@@ -105,8 +107,10 @@ function pairsWord(n) {
 function nextRefresh(lessons, now) {
   const marks = [];
   for (const l of lessons) {
-    if (l.from > now) marks.push(l.from);
-    if (l.to > now) marks.push(l.to);
+    for (const t of [l.from, l.to]) {
+      const early = new Date(t.getTime() - LEAD_MS);
+      if (early > now) marks.push(early);
+    }
   }
   marks.sort((a, b) => a - b);
   const in15 = new Date(now.getTime() + 15 * 60000);
@@ -146,7 +150,7 @@ async function run() {
   const family = config.widgetFamily || "accessoryRectangular";
   const data = await loadData();
   const lessons = data ? flatten(data) : [];
-  const view = data ? dayView(lessons, now) : null;
+  const view = data ? dayView(lessons, new Date(now.getTime() + LEAD_MS)) : null;
 
   const w = new ListWidget();
   w.refreshAfterDate = nextRefresh(lessons, now);

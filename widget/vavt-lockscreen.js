@@ -20,6 +20,9 @@ const DICT_URLS = [
   "https://cdn.jsdelivr.net/gh/Tipo4ekGG/arab@main/index.html",
 ];
 const WORD_EVERY_MIN = 15;
+// iOS обновляет виджет с опозданием. Чтобы таймер не уходил в плюс,
+// состояние меняется заранее: за 3 минуты до конца пары уже показывается перемена.
+const LEAD_MS = 3 * 60000;
 
 // Пары, которые не показывать (по началу названия).
 const HIDE = ["Русский как иностранный"];
@@ -125,16 +128,19 @@ function dayWord(isoDay, now) {
   return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][d.getDay()];
 }
 
-function nextRefresh(st, now, lessons) {
-  if (st.kind === "word") {
-    // следующая смена слова; к полуночи — чтобы утром показать первую пару
-    const step = WORD_EVERY_MIN * 60000;
-    return new Date((Math.floor(now.getTime() / step) + 1) * step + 2000);
-  }
-  const in15 = new Date(now.getTime() + 15 * 60000);
+function nextRefresh(st, now, lessons = []) {
   const min = new Date(now.getTime() + 60000);
-  if (st.target && st.target < in15) return st.target > min ? st.target : min;
-  return in15;
+  const in15 = new Date(now.getTime() + 15 * 60000);
+  const clamp = (t) => (t < min ? min : t > in15 ? in15 : t);
+  if (st.kind === "word") {
+    // следующая смена слова, но не позже, чем за 3 минуты до ближайшей пары
+    const step = WORD_EVERY_MIN * 60000;
+    let t = new Date((Math.floor(now.getTime() / step) + 1) * step + 2000);
+    const next = lessons.find((l) => l.from.getTime() - LEAD_MS > now.getTime());
+    if (next && next.from.getTime() - LEAD_MS < t.getTime()) t = new Date(next.from.getTime() - LEAD_MS);
+    return t < min ? min : t;
+  }
+  return clamp(new Date(st.target.getTime() - LEAD_MS));
 }
 
 // ------------------------------------------------------------ Scriptable
@@ -187,14 +193,15 @@ async function run() {
   const now = new Date();
   const family = config.widgetFamily || "accessoryRectangular";
   const data = await loadData();
-  let st = data ? status(flatten(data), now) : { kind: "word" };
+  const lessons = data ? flatten(data) : [];
+  let st = data ? status(lessons, new Date(now.getTime() + LEAD_MS)) : { kind: "word" };
   if (st.kind === "word") {
     st.word = wordFor(await loadWords(), now);
     if (!st.word) st = { kind: data ? "none" : "error" };
   }
 
   const w = new ListWidget();
-  w.refreshAfterDate = nextRefresh(st, now);
+  w.refreshAfterDate = nextRefresh(st, now, lessons);
 
   if (family === "accessoryInline") inline(w, st, now);
   else if (family === "accessoryCircular") circular(w, st, now);
