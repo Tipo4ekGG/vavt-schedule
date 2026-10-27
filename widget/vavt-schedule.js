@@ -231,10 +231,12 @@ function parsePhrases(html) {
   return out;
 }
 
-// Фраза дня: весь день одна, на следующий — другая.
+// Фраза дня меняется в PHRASE_HOUR ночи: до этого часа ещё «вчерашняя».
+const PHRASE_HOUR = 4;
 function phraseFor(phrases, now) {
   if (!phrases.length) return null;
-  const day = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 86400000);
+  const t = new Date(now.getTime() - PHRASE_HOUR * 3600000);
+  const day = Math.floor(new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime() / 86400000);
   return phrases[((day * 2654435761) % 4294967296) % phrases.length];
 }
 
