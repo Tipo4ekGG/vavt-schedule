@@ -225,7 +225,8 @@ function parsePhrases(html) {
     for (const row of table.match(/<tr>[\s\S]*?<\/tr>/g) || []) {
       const ar = (row.match(/<td class="ar"[^>]*>([\s\S]*?)<\/td>/) || [])[1];
       const ru = (row.match(/<td class="ru"[^>]*>([\s\S]*?)<\/td>/) || [])[1];
-      if (ar && ru) out.push({ ar: strip(ar), ru: strip(ru) });
+      const tr = (row.match(/<td class="tr"[^>]*>([\s\S]*?)<\/td>/) || [])[1];
+      if (ar && ru) out.push({ ar: strip(ar), tr: tr ? strip(tr) : "", ru: strip(ru) });
     }
   }
   return out;
@@ -307,7 +308,7 @@ async function loadData() {
 // Фразы словаря; перекачиваются не чаще раза в сутки.
 async function loadPhrases() {
   const fm = FileManager.local();
-  const cache = fm.joinPath(fm.cacheDirectory(), "arab-phrases.json");
+  const cache = fm.joinPath(fm.cacheDirectory(), "arab-phrases-v2.json");
   const fresh = fm.fileExists(cache) && (Date.now() - fm.modificationDate(cache).getTime()) < 24 * 3600000;
   if (fresh) return JSON.parse(fm.readString(cache));
   for (const url of DICT_URLS) {
@@ -578,7 +579,11 @@ function phraseCard(col, phrase, c) {
   box.addSpacer(4);
   const a = centered(box, phrase.ar, Font.semiboldSystemFont(18), c.text);
   a.minimumScaleFactor = 0.7;
-  box.addSpacer(3);
+  if (phrase.tr) {
+    box.addSpacer(2);
+    centered(box, phrase.tr, Font.italicSystemFont(11), c.text);
+  }
+  box.addSpacer(2);
   centered(box, phrase.ru, Font.systemFont(11), c.dim);
 }
 
