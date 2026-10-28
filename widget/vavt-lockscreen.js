@@ -171,7 +171,7 @@ async function loadData() {
 // Словарь кешируется и перекачивается не чаще раза в 6 часов.
 async function loadWords() {
   const fm = FileManager.local();
-  const cache = fm.joinPath(fm.cacheDirectory(), "arab-words.json");
+  const cache = fm.joinPath(fm.cacheDirectory(), "arab-words-v2.json");
   const fresh = fm.fileExists(cache) && (Date.now() - fm.modificationDate(cache).getTime()) < 6 * 3600000;
   if (fresh) return JSON.parse(fm.readString(cache));
   for (const url of DICT_URLS) {
@@ -265,11 +265,21 @@ function rectangular(w, st, now) {
   w.addSpacer(); // прижать к верху — на одной линии с соседним виджетом
 }
 
+// Четыре строки, как у виджета с парами слева: подпись, слово, транскрипция, перевод.
 function wordRect(w, word) {
   rightText(w, "Арабское слово", Font.semiboldSystemFont(11), 0.75);
-  // Geeza Pro — встроенный арабский шрифт iOS: огласовки в нём не слипаются
-  const a = rightText(w, word.ar, new Font("GeezaPro-Bold", 21));
-  a.minimumScaleFactor = 0.5;
+  // Geeza Pro — встроенный арабский шрифт iOS: огласовки в нём не слипаются.
+  // Огласовки выше строки — даём ей запас сверху, иначе шадда и фатха обрезаются.
+  const arRow = rightRow(w);
+  arRow.setPadding(5, 0, 0, 0);
+  const a = arRow.addText(word.ar);
+  a.font = new Font("GeezaPro-Bold", 18);
+  a.lineLimit = 1;
+  a.rightAlignText();
+  if (word.tr) {
+    const t = rightText(w, word.tr, Font.italicSystemFont(11), 0.85);
+    t.minimumScaleFactor = 0.8;
+  }
   const r = rightText(w, word.ru, Font.mediumSystemFont(12));
   r.minimumScaleFactor = 0.8;
 }
