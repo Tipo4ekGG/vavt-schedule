@@ -577,7 +577,8 @@ function phraseCard(col, phrase, c) {
   box.backgroundColor = c.card;
   centered(box, "ФРАЗА ДНЯ", Font.semiboldSystemFont(9), c.dim);
   box.addSpacer(4);
-  const a = centered(box, phrase.ar, Font.semiboldSystemFont(18), c.text);
+  // Geeza Pro — встроенный арабский шрифт iOS: огласовки в нём не слипаются, в отличие от системного
+  const a = centered(box, phrase.ar, new Font("GeezaPro-Bold", 19), c.text);
   a.minimumScaleFactor = 0.7;
   if (phrase.tr) {
     box.addSpacer(2);

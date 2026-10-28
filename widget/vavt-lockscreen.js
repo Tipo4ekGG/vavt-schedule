@@ -267,7 +267,8 @@ function rectangular(w, st, now) {
 
 function wordRect(w, word) {
   rightText(w, "Арабское слово", Font.semiboldSystemFont(11), 0.75);
-  const a = rightText(w, word.ar, Font.boldSystemFont(22));
+  // Geeza Pro — встроенный арабский шрифт iOS: огласовки в нём не слипаются
+  const a = rightText(w, word.ar, new Font("GeezaPro-Bold", 21));
   a.minimumScaleFactor = 0.5;
   const r = rightText(w, word.ru, Font.mediumSystemFont(12));
   r.minimumScaleFactor = 0.8;
@@ -296,7 +297,7 @@ function circular(w, st, now) {
     return;
   }
   if (st.kind === "word") {
-    add(st.word.ar.split(" / ")[0], Font.boldSystemFont(18));
+    add(st.word.ar.split(" / ")[0], new Font("GeezaPro-Bold", 17));
     return;
   }
   if (!st.target) {
