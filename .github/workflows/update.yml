@@ -31,35 +31,10 @@ jobs:
 
       - run: pip install -r parser/requirements.txt
 
-      - name: Диагностика страницы ВАВТ
-        run: |
-          python - <<'PY'
-          import urllib.parse, urllib.request, re
-          q = urllib.parse.urlencode({
-              "f": "Бакалавриат",
-              "o": "Очная форма обучения",
-              "n": "ФВМ",
-              "k": "1 курс",
-          })
-          url = "https://www.vavt.ru/schedule/?" + q
-          req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (vavt-schedule widget; +https://github.com)"})
-          html = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
-          print("URL:", url)
-          print("HTML bytes:", len(html.encode("utf-8")))
-          print("_items_ blocks:", len(re.findall(r'_items_', html)))
-          print("class with two:", len(re.findall(r'class=[\"\'][^\"\']*\btwo\b', html)))
-          links = re.findall(r'href=[\"\']([^\"\']*/upload/schedule/[^\"\']+)[\"\']', html, re.I)
-          print("schedule PDF links:", len(links))
-          for href in links:
-              name = urllib.parse.unquote(href.split("?")[0].rsplit("/", 1)[-1])
-              if "ММВЯ" in name.upper():
-                  print("ММВЯ PDF:", name)
-          PY
-
       - name: Скачать и разобрать PDF
         run: |
           mkdir -p data
-          python parser/vavt_schedule.py \
+          python parser/run_schedule.py \
             --group "${{ vars.GROUP || 'Б26М-ММВЯ.2' }}" \
             --faculty "${{ vars.FACULTY || 'ФВМ' }}" \
             --course "${{ vars.COURSE || '1 курс' }}" \
